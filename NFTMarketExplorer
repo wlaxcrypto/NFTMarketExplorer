@@ -1,0 +1,66 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+contract NFTMarketExplorer is ERC721Holder, Ownable {
+    struct NFTListing {
+        address seller;
+        uint256 tokenId;
+        uint256 price;
+        bool active;
+    }
+
+    mapping(uint256 => NFTListing) public nftListings;
+    uint256 public listingCount;
+
+    // Events
+    event NFTListed(uint256 indexed listingId, address indexed seller, uint256 indexed tokenId, uint256 price);
+    event NFTSold(uint256 indexed listingId, address indexed seller, address indexed buyer, uint256 price);
+
+    // List an NFT for sale
+    function listNFT(address nftContract, uint256 tokenId, uint256 price) external {
+        require(IERC721(nftContract).ownerOf(tokenId) == msg.sender, "Not the owner of the NFT");
+        require(price > 0, "Price must be greater than zero");
+
+        IERC721(nftContract).safeTransferFrom(msg.sender, address(this), tokenId);
+
+        nftListings[listingCount] = NFTListing({
+            seller: msg.sender,
+            tokenId: tokenId,
+            price: price,
+            active: true
+        });
+
+        emit NFTListed(listingCount, msg.sender, tokenId, price);
+        listingCount++;
+    }
+
+    // Buy an NFT listed for sale
+    function buyNFT(uint256 listingId) external payable {
+        require(listingId < listingCount, "Invalid listing ID");
+        require(nftListings[listingId].active, "Listing not active");
+        require(msg.value >= nftListings[listingId].price, "Insufficient funds");
+
+        address payable seller = payable(nftListings[listingId].seller);
+        seller.transfer(msg.value);
+
+        IERC721(nftListings[listingId].seller).safeTransferFrom(address(this), msg.sender, nftListings[listingId].tokenId);
+
+        nftListings[listingId].active = false;
+
+        emit NFTSold(listingId, nftListings[listingId].seller, msg.sender, nftListings[listingId].price);
+    }
+
+    // Withdraw NFT listed for sale back to the owner
+    function withdrawNFT(uint256 listingId) external {
+        require(listingId < listingCount, "Invalid listing ID");
+        require(msg.sender == nftListings[listingId].seller, "Not the seller");
+
+        IERC721(nftListings[listingId].seller).safeTransferFrom(address(this), msg.sender, nftListings[listingId].tokenId);
+
+        nftListings[listingId].active = false;
+    }
+}
